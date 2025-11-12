@@ -5,10 +5,12 @@ import { server as webSocketServer } from 'websocket';
 import config from './config';
 import adminSeeder from './seeder/adminSeeder';
 import startCourtReminderCron from './util/coateReminderCorn';
+import { MessageModel } from './modules/message/message.model';
+import { connection as WSConnection } from 'websocket'; // needed for type
 
 let server: HTTPServer;
 
-const clients = new Map();
+const clients = new Map<WSConnection, { user: string; rooms: Set<string> }>();
 console.log('here are the clients *******>>>>>>>>>', clients);
 
 async function main() {
@@ -19,38 +21,62 @@ async function main() {
     await adminSeeder();
     startCourtReminderCron();
 
-    // Start Express server
+    // Start Express server first
     server = app.listen(config.port, () => {
       console.log(
         `Mr. Amin Lawyer server app listening on port ${config.port}`,
       );
     });
 
-    //initialize web sockets server
-
+    // Now initialize WebSocket server
     const wss = new webSocketServer({ httpServer: server });
-    console.log("websocket========>>>>>>>", wss)
+    console.log('WebSocket initialized.');
 
-    wss.on('connect', (ws) => {
-      console.log('web socket connection established with client');
+wss.on('connect', (ws) => {
+  console.log('New client connected', ws);
 
-      ws.on('message', async (data) => {
-        try {
-        } 
-        catch (err: any) {
-          console.error(
-            'Something went wrong in server or mongoose connection:',
-            err,
-          );
-          throw err;
+  ws.on('message', async (data) => {
+    try {
+      const message = JSON.parse(data.toString());
+      const { type, sender, recipient, content } = message;
+
+      if (type === 'join') {
+        const room = [sender, recipient].sort().join('-');
+        clients.set(ws, { user: sender, rooms: new Set([room]) });
+        console.log(`${sender} joined room: ${room}`);
+      } else if (type === 'message' && content) {
+        const newMessage = new MessageModel({ sender, recipient, content });
+        await newMessage.save();
+
+        const room = [sender, recipient].sort().join('-');
+        const messageData = { sender, recipient, content };
+
+        // ✅ loop through your clients map instead
+        for (const [client, info] of clients.entries()) {
+          if (info.rooms.has(room)) {
+            client.sendUTF(JSON.stringify({ type: 'message', data: messageData }));
+          }
         }
-      });
-    });
-  } 
-  catch (err: any) {
+      }
+    } catch (error) {
+      console.error('Error processing message:', error);
+    }
+  });
+
+  ws.on('close', () => {
+    clients.delete(ws);
+    console.log('Client disconnected');
+  });
+  
+});
+
+  } catch (err: any) {
+    console.error('Error during server startup:', err);
     throw Error('something went wrong in server or mongoose connection');
   }
 }
+
+
 main();
 
 // Global unhandled promise rejection handler

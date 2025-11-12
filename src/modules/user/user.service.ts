@@ -8,120 +8,229 @@ import {
 import authUtil from '../auth/auth.util';
 import { userRole } from '../../constants';
 
+// const createUser = async (
+//   payload: Partial<TUser>,
+//   file?: any,
+//   method?: string,
+// ) => {
+//   // Validate password match
+//   if (payload.password !== payload.confirmPassword) {
+//     throw new Error('Password and confirm password do not match.');
+//   }
+
+//   // Validate terms agreement
+//   if (!payload.agreedToTerms) {
+//     throw new Error('You must agree to the terms and conditions to register.');
+//   }
+
+//   // Check for existing user
+//   // console.log('Checking if user exists');
+//   const existingUser = await UserModel.findOne({ email: payload.email }).select(
+//     '+password',
+//   );
+//   if (existingUser && !existingUser.isDeleted) {
+//     throw new Error('A user with this email already exists and is active.');
+//   }
+
+//   // Create new payload with default role
+//   const userPayload = {
+//     ...payload,
+//     role: payload.role || userRole.user,
+//   };
+
+//   // Remove confirmPassword from payload
+//   const { confirmPassword, ...userData } = userPayload;
+
+//   // console.log('User to be created:', userPayload);
+
+//   // Check MongoDB connection state
+//   if (mongoose.connection.readyState !== 1) {
+//     console.error(
+//       'MongoDB connection not ready, state:',
+//       mongoose.connection.readyState,
+//     );
+//     throw new Error('MongoDB connection is not ready.');
+//   }
+
+//   const session = await mongoose.startSession();
+
+//   try {
+//     await session.startTransaction();
+//     // console.log('Transaction started');
+
+//     let imageUrl: string | undefined;
+
+//     // Optional: Upload image to Cloudinary if file is provided
+//     if (file?.path) {
+//       const imageName = `${userData.email}-${Date.now()}`;
+//       const uploadResult = await uploadImgToCloudinary(imageName, file.path);
+//       imageUrl = uploadResult.secure_url;
+//       console.log('Image uploaded to Cloudinary:', imageUrl);
+//     } else {
+//       console.log('No image file provided, skipping upload');
+//     }
+
+//     // Add image URL to userData if available
+//     const userDataWithImg = {
+//       ...userData,
+//       ...(imageUrl && { img: imageUrl }),
+//     };
+
+//     let user;
+
+//     // Create user
+//     if (method) {
+//       console.log('Creating user with create method');
+//       const created = await UserModel.create([userDataWithImg], { session });
+//       user = created[0];
+//     } else {
+//       console.log('Creating user with new/save method');
+//       user = new UserModel({ ...userDataWithImg });
+//       await user.save({ session });
+//     }
+
+//     console.log('User created:', user._id);
+
+//     // Create profile with image URL (or undefined if no image)
+//     console.log('Creating profile');
+//     const profileCreation = await ProfileModel.create(
+//       [
+//         {
+//           name: userData.name ?? 'user',
+//           phone: userData.phone,
+//           email: userData.email!,
+//           user_id: user._id,
+//           img: imageUrl, // Include Cloudinary image URL or undefined
+//         },
+//       ],
+//       { session },
+//     );
+
+//     console.log('Profile created:', profileCreation[0]._id);
+
+//     // Commit the transaction
+//     await session.commitTransaction();
+//     console.log('Transaction committed');
+
+//     // Fetch the user after transaction
+//     const fetchedUser = await UserModel.findOne({
+//       email: userData.email,
+//     }).select('-password');
+//     if (!fetchedUser) {
+//       throw new Error('User created but not found after transaction.');
+//     }
+
+//     // Send OTP
+//     console.log('Sending OTP via email');
+//     const token = await authUtil.sendOTPViaEmail(fetchedUser);
+
+//     return {
+//       success: true,
+//       message: 'User created successfully and OTP sent.',
+//       user: fetchedUser.toObject(),
+//       token: token.token || null,
+//     };
+//   } catch (error: any) {
+//     await session.abortTransaction();
+//     console.error('Transaction failed:', error);
+
+//     // Clean up local file if upload failed and file was provided
+//     if (file?.path) {
+//       try {
+//         await deleteFile(file.path);
+//       } catch (deleteError) {
+//         console.error('Error deleting file:', deleteError);
+//       }
+//     }
+
+//     throw new Error(
+//       error.message || 'User creation failed due to an internal error.',
+//     );
+//   } finally {
+//     session.endSession();
+//     console.log('Session ended');
+//   }
+// };
+
+
+
+
 const createUser = async (
   payload: Partial<TUser>,
   file?: any,
   method?: string,
 ) => {
-  // Validate password match
   if (payload.password !== payload.confirmPassword) {
     throw new Error('Password and confirm password do not match.');
   }
 
-  // Validate terms agreement
   if (!payload.agreedToTerms) {
     throw new Error('You must agree to the terms and conditions to register.');
   }
 
-  // Check for existing user
-  // console.log('Checking if user exists');
-  const existingUser = await UserModel.findOne({ email: payload.email }).select(
-    '+password',
-  );
+  const existingUser = await UserModel.findOne({ email: payload.email }).select('+password');
   if (existingUser && !existingUser.isDeleted) {
     throw new Error('A user with this email already exists and is active.');
   }
 
-  // Create new payload with default role
-  const userPayload = {
+  const { confirmPassword, ...userData } = {
     ...payload,
     role: payload.role || userRole.user,
   };
 
-  // Remove confirmPassword from payload
-  const { confirmPassword, ...userData } = userPayload;
-
-  // console.log('User to be created:', userPayload);
-
-  // Check MongoDB connection state
   if (mongoose.connection.readyState !== 1) {
-    console.error(
-      'MongoDB connection not ready, state:',
-      mongoose.connection.readyState,
-    );
     throw new Error('MongoDB connection is not ready.');
   }
 
   const session = await mongoose.startSession();
+  let transactionCommitted = false; // <-- track commit state
 
   try {
     await session.startTransaction();
-    // console.log('Transaction started');
 
     let imageUrl: string | undefined;
 
-    // Optional: Upload image to Cloudinary if file is provided
     if (file?.path) {
       const imageName = `${userData.email}-${Date.now()}`;
       const uploadResult = await uploadImgToCloudinary(imageName, file.path);
       imageUrl = uploadResult.secure_url;
-      console.log('Image uploaded to Cloudinary:', imageUrl);
-    } else {
-      console.log('No image file provided, skipping upload');
     }
 
-    // Add image URL to userData if available
     const userDataWithImg = {
       ...userData,
       ...(imageUrl && { img: imageUrl }),
     };
 
     let user;
-
-    // Create user
     if (method) {
-      console.log('Creating user with create method');
       const created = await UserModel.create([userDataWithImg], { session });
       user = created[0];
     } else {
-      console.log('Creating user with new/save method');
-      user = new UserModel({ ...userDataWithImg });
+      user = new UserModel(userDataWithImg);
       await user.save({ session });
     }
 
-    console.log('User created:', user._id);
-
-    // Create profile with image URL (or undefined if no image)
-    console.log('Creating profile');
-    const profileCreation = await ProfileModel.create(
+    const profile = await ProfileModel.create(
       [
         {
           name: userData.name ?? 'user',
           phone: userData.phone,
           email: userData.email!,
           user_id: user._id,
-          img: imageUrl, // Include Cloudinary image URL or undefined
+          img: imageUrl,
         },
       ],
       { session },
     );
 
-    console.log('Profile created:', profileCreation[0]._id);
-
-    // Commit the transaction
     await session.commitTransaction();
-    console.log('Transaction committed');
+    transactionCommitted = true; // <-- mark commit done
 
-    // Fetch the user after transaction
-    const fetchedUser = await UserModel.findOne({
-      email: userData.email,
-    }).select('-password');
+    const fetchedUser = await UserModel.findOne({ email: userData.email }).select('-password');
     if (!fetchedUser) {
       throw new Error('User created but not found after transaction.');
     }
 
-    // Send OTP
-    console.log('Sending OTP via email');
     const token = await authUtil.sendOTPViaEmail(fetchedUser);
 
     return {
@@ -131,10 +240,13 @@ const createUser = async (
       token: token.token || null,
     };
   } catch (error: any) {
-    await session.abortTransaction();
+    // Only abort if transaction not already committed
+    if (!transactionCommitted) {
+      await session.abortTransaction();
+    }
+
     console.error('Transaction failed:', error);
 
-    // Clean up local file if upload failed and file was provided
     if (file?.path) {
       try {
         await deleteFile(file.path);
@@ -143,14 +255,15 @@ const createUser = async (
       }
     }
 
-    throw new Error(
-      error.message || 'User creation failed due to an internal error.',
-    );
+    throw new Error(error.message || 'User creation failed due to an internal error.');
   } finally {
     session.endSession();
-    console.log('Session ended');
   }
 };
+
+
+
+
 
 const setFCMToken = async (user_id: Types.ObjectId, fcmToken: string) => {
   if (!fcmToken) {
